@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import logging
+import re
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -54,6 +55,21 @@ IMAGE_PROMPT = """你是一個蔬果訂單 OCR 助手。
 如果圖片不含訂單（例如一般照片、風景），只回傳：{"is_order": false}"""
 
 
+def extract_json(text: str) -> dict:
+    """從 Claude 回傳的文字中安全地提取 JSON"""
+    # 移除 markdown code block
+    text = text.strip()
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    text = text.strip()
+    # 找到第一個 { 到最後一個 }
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        text = text[start:end+1]
+    return json.loads(text)
+
+
 def get_sheets_client():
     creds_json = json.loads(os.environ['GOOGLE_CREDENTIALS'])
     creds = Credentials.from_service_account_info(
@@ -79,8 +95,9 @@ def parse_text_order(text: str) -> dict:
         max_tokens=800,
         messages=[{"role": "user", "content": TEXT_PROMPT.format(text=text)}]
     )
-    raw = response.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-    return json.loads(raw)
+    raw = response.content[0].text
+    logger.info(f"Claude 文字回傳: {raw[:200]}")
+    return extract_json(raw)
 
 
 def parse_image_order(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -99,15 +116,13 @@ def parse_image_order(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict
                         "data": image_b64,
                     },
                 },
-                {
-                    "type": "text",
-                    "text": IMAGE_PROMPT
-                }
+                {"type": "text", "text": IMAGE_PROMPT}
             ],
         }]
     )
-    raw = response.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-    return json.loads(raw)
+    raw = response.content[0].text
+    logger.info(f"Claude 圖片回傳: {raw[:200]}")
+    return extract_json(raw)
 
 
 def get_display_name(user_id: str) -> str:
