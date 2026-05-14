@@ -13,7 +13,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)  # v5
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
