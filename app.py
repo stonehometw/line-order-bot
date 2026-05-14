@@ -91,7 +91,7 @@ def ensure_header(ws):
 
 def parse_text_order(text: str) -> dict:
     response = claude_client.messages.create(
-        model="claude-sonnet-4-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=800,
         messages=[{"role": "user", "content": TEXT_PROMPT.format(text=text)}]
     )
@@ -103,7 +103,7 @@ def parse_text_order(text: str) -> dict:
 def parse_image_order(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     response = claude_client.messages.create(
-        model="claude-sonnet-4-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=800,
         messages=[{
             "role": "user",
