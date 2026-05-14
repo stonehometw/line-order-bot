@@ -93,7 +93,7 @@ def parse_text_order(text: str) -> dict:
     response = claude_client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=800,
-        messages=[{"role": "user", "content": TEXT_PROMPT.format(text=text)}]
+        messages=[{"role": "user", "content": TEXT_PROMPT.replace("{text}", text)}]
     )
     raw = response.content[0].text
     logger.info(f"Claude 文字回傳: {raw[:200]}")
