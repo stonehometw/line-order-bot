@@ -5,8 +5,8 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage
-from linebot.models import SourceGroup, SourceRoom
 import anthropic
+import httpx
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
@@ -18,7 +18,12 @@ app = Flask(__name__)
 
 line_bot_api = LineBotApi(os.environ['LINE_CHANNEL_ACCESS_TOKEN'])
 handler = WebhookHandler(os.environ['LINE_CHANNEL_SECRET'])
-claude_client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+
+# 修正 httpx 版本衝突問題
+claude_client = anthropic.Anthropic(
+    api_key=os.environ['ANTHROPIC_API_KEY'],
+    http_client=httpx.Client()
+)
 
 PARSE_PROMPT = """你是一個蔬果訂單解析助手。
 
@@ -34,7 +39,7 @@ PARSE_PROMPT = """你是一個蔬果訂單解析助手。
 
 如果不是訂單（例如一般聊天、圖片說明），只回傳：{"is_order": false}
 
-訊息內容：
+訊息：
 {text}"""
 
 
@@ -51,7 +56,6 @@ def get_sheets_client():
 
 
 def ensure_header(ws):
-    """確保試算表有標題列"""
     first_row = ws.row_values(1)
     expected = ['時間', '店家', '品項', '數量', '單位', '傳送者']
     if first_row != expected:
@@ -68,7 +72,6 @@ def parse_order(text: str) -> dict:
         }]
     )
     raw = response.content[0].text.strip()
-    # 移除可能的 markdown code block
     raw = raw.replace('```json', '').replace('```', '').strip()
     return json.loads(raw)
 
@@ -120,14 +123,11 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
-
-    # 取得傳送者名稱
     user_id = event.source.user_id
     sender_name = get_display_name(user_id)
 
     logger.info(f"收到訊息 from {sender_name}: {text[:50]}")
 
-    # 解析訂單
     try:
         result = parse_order(text)
     except Exception as e:
@@ -135,17 +135,14 @@ def handle_message(event):
         return
 
     if not result.get('is_order'):
-        return  # 非訂單，靜默忽略
+        return
 
-    # 寫入 Google Sheets
     try:
         count = write_to_sheets(result, sender_name)
-        logger.info(f"已寫入 {count} 筆訂單，店家：{result['store']}")
+        logger.info(f"靜默寫入完成：{result['store']} {count} 筆")
     except Exception as e:
         logger.error(f"寫入 Sheets 失敗: {e}")
         return
-
-    logger.info(f"靜默寫入完成：{result['store']} {count} 筆")
 
 
 @app.route('/health', methods=['GET'])
