@@ -60,6 +60,18 @@ IMAGE_PROMPT = """你是一個蔬果訂單 OCR 助手。請仔細辨識這張圖
 數量和單位請分開，例如「50斤」→ qty:"50", unit:"斤"；「2件」→ qty:"2", unit:"件"
 如果圖片不含訂單，只回傳：{"is_order": false}"""
 
+TABLE_IMAGE_PROMPT = """你是一個 OCR 助手。請仔細辨識這張圖片中的表格內容。
+請將圖片中的表格內容完整擷取下來，並以 JSON 二維陣列 (List of Lists) 的格式回傳。
+每一列 (Row) 是一個陣列，包含該列的所有欄位文字。
+請「只」回傳這個 JSON 陣列，不要包含任何其他文字、Markdown 符號或 ```json 標籤。
+例如：
+[
+  ["品名", "數量", "備註"],
+  ["高麗菜", "50斤", ""],
+  ["洋蔥", "2件", "大"]
+]
+如果圖片沒有內容，請回傳 []。"""
+
 
 def extract_json(text: str) -> dict:
     text = text.strip()
@@ -162,6 +174,39 @@ def parse_with_gemini_image(image_bytes: bytes) -> dict:
     return extract_json(raw)
 
 
+def parse_with_gemini_table(image_bytes: bytes) -> list[list[str]]:
+    response = gemini_client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+            TABLE_IMAGE_PROMPT
+        ]
+    )
+    raw = response.text
+    logger.info(f"Gemini 表格回傳: {raw[:100]}")
+    text = raw.strip()
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    try:
+        table_rows = json.loads(text.strip())
+        if isinstance(table_rows, list):
+            return table_rows
+    except Exception as e:
+        logger.error(f"Gemini 表格 JSON 解析失敗: {e}")
+    return []
+
+def process_gemini_table_flow(image_bytes, write_fn_args):
+    try:
+        table_rows = parse_with_gemini_table(image_bytes)
+        if not table_rows:
+            logger.info("Gemini: 未擷取到表格，忽略")
+            return
+        sender_name, source = write_fn_args
+        count = write_table_to_sheets(table_rows, sender_name, source, "Gemini")
+        logger.info(f"Gemini 表格寫入完成：{count} 列")
+    except Exception as e:
+        logger.error(f"Gemini 表格流程失敗: {e}")
+
 def get_display_name(user_id: str) -> str:
     try:
         return line_bot_api.get_profile(user_id).display_name
@@ -216,13 +261,13 @@ def parse_with_docai_image(image_bytes: bytes) -> list[list[str]]:
     return table_rows
 
 
-def write_table_to_sheets(table_rows: list[list[str]], sender_name: str, source: str) -> int:
+def write_table_to_sheets(table_rows: list[list[str]], sender_name: str, source: str, sheet_name: str = "Document AI") -> int:
     if not table_rows:
         return 0
         
     gc = get_sheets_client()
     sh = gc.open(os.environ['SHEET_NAME'])
-    ws = get_or_create_sheet(sh, "Document AI")
+    ws = get_or_create_sheet(sh, sheet_name)
     
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     
@@ -303,8 +348,7 @@ def handle_image(event):
     # 同時啟動兩個執行緒 (暫停 Claude)
     # t1 = threading.Thread(target=process_with_model,
     #     args=(lambda: parse_with_claude_image(image_bytes), (sender, "圖片"), "Claude"))
-    t2 = threading.Thread(target=process_with_model,
-        args=(lambda: parse_with_gemini_image(image_bytes), (sender, "圖片"), "Gemini"))
+    t2 = threading.Thread(target=process_gemini_table_flow, args=(image_bytes, (sender, "圖片")))
     t3 = threading.Thread(target=process_with_docai, args=(image_bytes, (sender, "圖片")))
     # t1.start()
     t2.start()
