@@ -14,6 +14,8 @@ from google import genai
 from google.genai import types
 import gspread
 from google.oauth2.service_account import Credentials
+from google.cloud import documentai
+from google.api_core.client_options import ClientOptions
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
@@ -166,6 +168,88 @@ def get_display_name(user_id: str) -> str:
     except Exception:
         return user_id
 
+# ── Document AI 解析 ──────────────────────────────────────────
+def parse_with_docai_image(image_bytes: bytes) -> list[list[str]]:
+    project_id = os.environ.get('DOCAI_PROJECT_ID')
+    location = os.environ.get('DOCAI_LOCATION', 'us')
+    processor_id = os.environ.get('DOCAI_PROCESSOR_ID')
+    if not project_id or not processor_id:
+        logger.error("Document AI 環境變數未設定 (DOCAI_PROJECT_ID, DOCAI_PROCESSOR_ID)")
+        return []
+
+    opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com")
+    client = documentai.DocumentProcessorServiceClient(client_options=opts)
+    name = client.processor_path(project_id, location, processor_id)
+    
+    raw_document = documentai.RawDocument(content=image_bytes, mime_type="image/jpeg")
+    request = documentai.ProcessRequest(name=name, raw_document=raw_document)
+    
+    try:
+        result = client.process_document(request=request)
+    except Exception as e:
+        logger.error(f"Document AI API 失敗: {e}")
+        return []
+
+    document = result.document
+    table_rows = []
+    
+    def layout_to_text(layout, text):
+        # 提取文字並將內部的換行替換為空白，以防破壞表格結構
+        val = "".join([text[segment.start_index:segment.end_index] for segment in layout.text_anchor.text_segments]).strip()
+        return val.replace('\n', ' ')
+    
+    for page in document.pages:
+        for table in page.tables:
+            for row in table.header_rows:
+                row_data = []
+                for cell in row.cells:
+                    cell_text = layout_to_text(cell.layout, document.text)
+                    row_data.append(cell_text)
+                table_rows.append(row_data)
+            for row in table.body_rows:
+                row_data = []
+                for cell in row.cells:
+                    cell_text = layout_to_text(cell.layout, document.text)
+                    row_data.append(cell_text)
+                table_rows.append(row_data)
+                
+    return table_rows
+
+
+def write_table_to_sheets(table_rows: list[list[str]], sender_name: str, source: str) -> int:
+    if not table_rows:
+        return 0
+        
+    gc = get_sheets_client()
+    sh = gc.open(os.environ['SHEET_NAME'])
+    ws = get_or_create_sheet(sh, "Document AI")
+    
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # 準備寫入的資料
+    # 第一列：時間、傳送者、來源
+    write_data = [[f"[{now}] 來自 {sender_name} ({source}) 的表格"]]
+    
+    # 將擷取的表格附加到後面
+    write_data.extend(table_rows)
+    # 加一個空行作分隔
+    write_data.append([])
+    
+    ws.append_rows(write_data, value_input_option='USER_ENTERED')
+    return len(table_rows)
+
+def process_with_docai(image_bytes, write_fn_args):
+    try:
+        table_rows = parse_with_docai_image(image_bytes)
+        if not table_rows:
+            logger.info("Document AI: 未擷取到表格，忽略")
+            return
+        sender_name, source = write_fn_args
+        count = write_table_to_sheets(table_rows, sender_name, source)
+        logger.info(f"Document AI 寫入完成：{count} 列")
+    except Exception as e:
+        logger.error(f"Document AI 失敗: {e}")
+
 # ── 並行處理兩個 AI ──────────────────────────────────────────
 def process_with_model(parse_fn, write_fn_args, model_name):
     try:
@@ -221,8 +305,10 @@ def handle_image(event):
     #     args=(lambda: parse_with_claude_image(image_bytes), (sender, "圖片"), "Claude"))
     t2 = threading.Thread(target=process_with_model,
         args=(lambda: parse_with_gemini_image(image_bytes), (sender, "圖片"), "Gemini"))
+    t3 = threading.Thread(target=process_with_docai, args=(image_bytes, (sender, "圖片")))
     # t1.start()
     t2.start()
+    t3.start()
 
 
 @app.route('/health', methods=['GET'])
