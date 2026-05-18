@@ -23,17 +23,17 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-line_bot_api = LineBotApi(os.environ['LINE_CHANNEL_ACCESS_TOKEN'])
-handler = WebhookHandler(os.environ['LINE_CHANNEL_SECRET'])
+line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '未設定'))
+handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', '未設定'))
 
 # Claude 客戶端
 claude_client = anthropic.Anthropic(
-    api_key=os.environ['ANTHROPIC_API_KEY'],
+    api_key=os.environ.get('ANTHROPIC_API_KEY', '未設定'),
     http_client=httpx.Client()
 )
 
 # Gemini 客戶端
-gemini_client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
+gemini_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY', '未設定'))
 GEMINI_MODEL = 'gemini-2.5-pro'
 
 TEXT_PROMPT = """你是一個蔬果訂單解析助手。
