@@ -32,7 +32,7 @@ claude_client = anthropic.Anthropic(
 
 # Gemini 客戶端
 gemini_client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
-GEMINI_MODEL = 'gemini-2.0-flash'
+GEMINI_MODEL = 'gemini-2.5-pro'
 
 TEXT_PROMPT = """你是一個蔬果訂單解析助手。
 
