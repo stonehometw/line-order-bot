@@ -110,7 +110,6 @@ def write_to_sheets(data: dict, sender_name: str, source: str, model: str) -> in
         ws.append_rows(rows, value_input_option='USER_ENTERED')
     return len(rows)
 
-
 # ── Claude 解析 ──────────────────────────────────────────────
 def parse_with_claude_text(text: str) -> dict:
     response = claude_client.messages.create(
@@ -136,7 +135,6 @@ def parse_with_claude_image(image_bytes: bytes) -> dict:
     raw = response.content[0].text
     logger.info(f"Claude 圖片回傳: {raw[:100]}")
     return extract_json(raw)
-
 
 # ── Gemini 解析 ──────────────────────────────────────────────
 def parse_with_gemini_text(text: str) -> dict:
@@ -168,7 +166,6 @@ def get_display_name(user_id: str) -> str:
     except Exception:
         return user_id
 
-
 # ── 並行處理兩個 AI ──────────────────────────────────────────
 def process_with_model(parse_fn, write_fn_args, model_name):
     try:
@@ -199,12 +196,12 @@ def handle_text(event):
     sender = get_display_name(event.source.user_id)
     logger.info(f"[文字] from {sender}: {text[:50]}")
 
-    # 同時啟動兩個執行緒
-    t1 = threading.Thread(target=process_with_model,
-        args=(lambda: parse_with_claude_text(text), (sender, "文字"), "Claude"))
+    # 同時啟動兩個執行緒 (暫停 Claude)
+    # t1 = threading.Thread(target=process_with_model,
+    #     args=(lambda: parse_with_claude_text(text), (sender, "文字"), "Claude"))
     t2 = threading.Thread(target=process_with_model,
         args=(lambda: parse_with_gemini_text(text), (sender, "文字"), "Gemini"))
-    t1.start()
+    # t1.start()
     t2.start()
 
 
@@ -219,12 +216,12 @@ def handle_image(event):
         logger.error(f"圖片下載失敗: {e}")
         return
 
-    # 同時啟動兩個執行緒
-    t1 = threading.Thread(target=process_with_model,
-        args=(lambda: parse_with_claude_image(image_bytes), (sender, "圖片"), "Claude"))
+    # 同時啟動兩個執行緒 (暫停 Claude)
+    # t1 = threading.Thread(target=process_with_model,
+    #     args=(lambda: parse_with_claude_image(image_bytes), (sender, "圖片"), "Claude"))
     t2 = threading.Thread(target=process_with_model,
         args=(lambda: parse_with_gemini_image(image_bytes), (sender, "圖片"), "Gemini"))
-    t1.start()
+    # t1.start()
     t2.start()
 
 
